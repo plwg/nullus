@@ -10,7 +10,7 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
-nullus = "nullus/todo:main"
+nullus = "nullus.todo:main"
 
 [build-system]
 requires = ["hatchling"]
