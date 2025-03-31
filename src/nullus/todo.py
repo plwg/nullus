@@ -211,11 +211,34 @@ def prune_done():
     list_tasks()
 
 
-def dump_tasks():
+def purge(task_ids):
     tasks = load_tasks()
+    tasks = tasks.filter(~pl.col("id").is_in(task_ids))
+    tasks = reindex(tasks)
+    save_tasks(tasks)
 
-    with pl.Config(tbl_rows=-1, tbl_cols=-1):
-        print(tasks)
+    list_tasks()
+
+
+def dump_tasks(regex=None):
+    task_to_print = load_tasks()
+
+    if regex:
+        regex = regex.lower()
+
+        task_to_print = task_to_print.filter(
+            pl.concat_str(pl.all().cast(pl.String), ignore_nulls=True)
+            .str.to_lowercase()
+            .str.contains(regex),
+        )
+
+    with pl.Config(
+        tbl_rows=-1,
+        tbl_cols=-1,
+        tbl_hide_column_data_types=True,
+        set_tbl_hide_dataframe_shape=True,
+    ):
+        print(task_to_print)
 
 
 def list_tasks(regex=None):
@@ -235,6 +258,8 @@ def list_tasks(regex=None):
 
     if not task_to_print.is_empty():
         with pl.Config(
+            tbl_rows=-1,
+            tbl_cols=-1,
             tbl_hide_column_data_types=True,
             set_tbl_hide_dataframe_shape=True,
         ):
@@ -294,15 +319,6 @@ def main():
     )
 
     group.add_argument(
-        "-p",
-        "--pin",
-        nargs="+",
-        metavar="TASK_ID",
-        type=int,
-        help="pin task(s)",
-    )
-
-    group.add_argument(
         "-a",
         "--add",
         nargs="+",
@@ -313,7 +329,7 @@ def main():
     group.add_argument(
         "-u",
         "--update",
-        nargs="+",
+        nargs=2,
         metavar=("TASK_ID", "DESC"),
         help="update task description",
     )
@@ -343,15 +359,12 @@ def main():
     )
 
     group.add_argument(
-        "--prune",
-        action="store_true",
-        help="set done task(s) visibility to false and reassign task id(s)",
-    )
-
-    group.add_argument(
-        "--dump",
-        action="store_true",
-        help="list active and inactive tasks matching a regex; list all if regex is left empty",
+        "-p",
+        "--pin",
+        nargs="+",
+        metavar="TASK_ID",
+        type=int,
+        help="pin task(s)",
     )
 
     group.add_argument(
@@ -359,7 +372,34 @@ def main():
         nargs="+",
         metavar="TASK_ID",
         type=int,
-        help='"delete" tasks, setting their visibility to false',
+        help="toggle tasks visibility and reassign task id(s)",
+    )
+
+    group.add_argument(
+        "--prune",
+        action="store_true",
+        help="set done task(s) visibility to false and reassign task id(s)",
+    )
+
+    group.add_argument(
+        "--purge",
+        nargs="+",
+        metavar="TASK_ID",
+        type=int,
+        help="remove task(s) from storage",
+    )
+
+    group.add_argument(
+        "--dump",
+        action="store_true",
+        help="list active and inactive tasks",
+    )
+
+    group.add_argument(
+        "--dumpr",
+        nargs=1,
+        metavar="REGEX",
+        help="list active and inactive tasks matching a regex",
     )
 
     args = parser.parse_args()
@@ -375,11 +415,6 @@ def main():
             add_task(task)
 
     if args.update:
-        if len(args.update) != 2:
-            print("Provide [TASK_ID, NEW_DESC]")
-
-            return
-
         task_id, new_desc = args.update
         task_id = int(task_id)
         update_task(task_id, new_desc)
@@ -392,12 +427,12 @@ def main():
 
     if args.schedule:
         date, *task_ids = args.schedule
-        task_ids = list(map(int, task_ids))  # Convert IDs to integers
+        task_ids = list(map(int, task_ids))
         schedule_task(date, task_ids)
 
     if args.deadline:
         date, *task_ids = args.deadline
-        task_ids = list(map(int, task_ids))  # Convert IDs to integers
+        task_ids = list(map(int, task_ids))
         set_deadline(date, task_ids)
 
     if args.prune:
@@ -406,8 +441,15 @@ def main():
     if args.dump:
         dump_tasks()
 
+    if args.dumpr:
+        dump_tasks(args.dumpr[0])
+
     if args.delete:
         toggle_delete(args.delete)
+
+    if args.purge:
+        task_ids = list(map(int, args.purge))
+        purge(task_ids)
 
     return
 
