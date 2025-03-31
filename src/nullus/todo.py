@@ -268,7 +268,6 @@ def list_tasks(regex=None):
             tbl_hide_column_data_types=True,
             set_tbl_hide_dataframe_shape=True,
         ):
-
             if any(task_to_print["is_pin"]):
                 task_to_print = task_to_print.with_columns(
                     pl.when(pl.col("is_pin"))
