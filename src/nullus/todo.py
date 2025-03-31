@@ -409,8 +409,6 @@ def main():
 
     args = parser.parse_args()
 
-    # breakpoint()
-
     if not any(vars(args).values()):
         list_tasks()
 
