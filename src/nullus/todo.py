@@ -1,10 +1,10 @@
 import argparse
+from datetime import datetime
+from pathlib import Path
 
 import polars as pl
-from datetime import datetime
 
-
-TASKS_FILE = "tasks.csv"
+TASKS_FILE = Path("~/data/task.csv").expanduser()
 
 SCHEMA = {
     "id": pl.Int64,
@@ -15,13 +15,12 @@ SCHEMA = {
     "created": pl.Datetime,
     "is_visible": pl.Boolean,
     "is_pin": pl.Boolean,
-    "done_date":pl.Date
+    "done_date": pl.Date,
 }
 
 
 def load_tasks():
     """Load tasks from the text file."""
-
     try:
         tasks = pl.read_csv(TASKS_FILE, schema_overrides=SCHEMA)
     except (FileNotFoundError, pl.exceptions.NoDataError):
@@ -35,7 +34,7 @@ def load_tasks():
                 "created": [],
                 "is_visible": [],
                 "is_pin": [],
-                "done_date":[],
+                "done_date": [],
             },
             schema_overrides=SCHEMA,
         )
@@ -44,7 +43,6 @@ def load_tasks():
 
 def save_tasks(tasks):
     """Save tasks back to the text file."""
-
     tasks.write_csv(TASKS_FILE)
 
 
@@ -73,10 +71,9 @@ def add_task(task):
         schema_overrides=SCHEMA,
     )
 
-
-    breakpoint()
-
     tasks = pl.concat([tasks, task])
+
+    tasks = reindex(tasks)
 
     save_tasks(tasks)
 
@@ -91,7 +88,7 @@ def pin_task(task_ids):
         .when(pl.col("id").is_in(task_ids), ~(pl.col("is_pin")))
         .then(pl.lit(True))
         .otherwise(pl.col("is_pin"))
-        .alias("is_pin")
+        .alias("is_pin"),
     )
 
     save_tasks(tasks)
@@ -100,15 +97,14 @@ def pin_task(task_ids):
 def mark_done(task_ids):
     """Mark tasks as done by their IDs."""
     tasks = load_tasks()
-    
-    
+
     tasks = tasks.with_columns(
         pl.when(pl.col("id").is_in(task_ids), pl.col("status") == "DONE")
         .then(pl.lit(None))
         .when(pl.col("id").is_in(task_ids), ~(pl.col("status") == "DONE"))
         .then(pl.lit(datetime.now().date()))
         .otherwise(pl.col("done_date"))
-        .alias("done_date")
+        .alias("done_date"),
     )
 
     tasks = tasks.with_columns(
@@ -117,14 +113,14 @@ def mark_done(task_ids):
         .when(pl.col("id").is_in(task_ids), ~(pl.col("status") == "DONE"))
         .then(pl.lit("DONE"))
         .otherwise(pl.col("status"))
-        .alias("status")
+        .alias("status"),
     )
 
     tasks = tasks.with_columns(
         pl.when(~(pl.col("status") == "DONE"))
         .then(pl.lit(True))
         .otherwise(pl.col("is_visible"))
-        .alias("is_visible")
+        .alias("is_visible"),
     )
 
     save_tasks(tasks)
@@ -132,13 +128,12 @@ def mark_done(task_ids):
 
 def schedule_task(date, task_ids):
     """Schedule tasks for a specific date."""
-
     tasks = load_tasks()
     tasks = tasks.with_columns(
         pl.when(pl.col("id").is_in(task_ids))
         .then(pl.lit(date).cast(pl.Date))
         .otherwise(pl.col("scheduled"))
-        .alias("scheduled")
+        .alias("scheduled"),
     )
     save_tasks(tasks)
 
@@ -150,21 +145,12 @@ def set_deadline(date, task_ids):
         pl.when(pl.col("id").is_in(task_ids))
         .then(pl.lit(date).cast(pl.Date))
         .otherwise(pl.col("deadline"))
-        .alias("deadline")
+        .alias("deadline"),
     )
     save_tasks(tasks)
 
 
-def prune_done():
-    """Prune all done tasks and reassign task IDs."""
-    tasks = load_tasks()
-    tasks = tasks.with_columns(
-        pl.when(pl.col("status") == "DONE")
-        .then(pl.lit(False))
-        .otherwise(pl.col("is_visible"))
-        .alias("is_visible")
-    )
-
+def reindex(tasks):
     tasks = (
         tasks.sort(
             ["is_visible", "is_pin", "status", "scheduled", "deadline"],
@@ -174,16 +160,28 @@ def prune_done():
         .with_row_index("id", offset=1)
     )
 
+    return tasks
+
+
+def prune_done():
+    """Prune all done tasks and reassign task IDs."""
+    tasks = load_tasks()
+    tasks = tasks.with_columns(
+        pl.when(pl.col("status") == "DONE")
+        .then(pl.lit(False))
+        .otherwise(pl.col("is_visible"))
+        .alias("is_visible"),
+    )
+
+    tasks = reindex(tasks)
+
     save_tasks(tasks)
 
 
 def dump_tasks():
-    
-
     tasks = load_tasks()
 
-    with pl.Config(tbl_cols=50, tbl_rows=50):
-
+    with pl.Config(tbl_rows=-1, tbl_cols=-1):
         print(tasks)
 
 
@@ -199,19 +197,19 @@ def list_tasks(regex=None):
         task_to_print = task_to_print.filter(
             pl.concat_str(pl.all().cast(pl.String), ignore_nulls=True)
             .str.to_lowercase()
-            .str.contains(regex)
+            .str.contains(regex),
         )
 
     if not task_to_print.is_empty():
         with pl.Config(
-            tbl_hide_column_data_types=True, set_tbl_hide_dataframe_shape=True
+            tbl_hide_column_data_types=True, set_tbl_hide_dataframe_shape=True,
         ):
             if any(task_to_print["is_pin"]):
                 task_to_print = task_to_print.with_columns(
                     pl.when(pl.col("is_pin"))
                     .then(pl.lit("*"))
                     .otherwise(pl.lit(""))
-                    .alias("pin")
+                    .alias("pin"),
                 )
 
                 sort_cols = ["is_pin", "status", "scheduled", "deadline"]
@@ -258,7 +256,7 @@ def main():
     )
 
     group.add_argument(
-        "-p", "--pin", nargs="+", metavar="TASK_ID", type=int, help="Pin task(s)"
+        "-p", "--pin", nargs="+", metavar="TASK_ID", type=int, help="Pin task(s)",
     )
 
     group.add_argument("-a", "--add", nargs="+", metavar="TASK", help="Add task(s)")
