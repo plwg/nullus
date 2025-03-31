@@ -44,7 +44,7 @@ def load_tasks():
 def save_tasks(tasks):
     DATA_PATH.mkdir(parents=True, exist_ok=True)
 
-    tasks.write_csv(TASKS_FILE)
+    tasks.write_csv(DATA_PATH / TASKS_FILE)
 
 
 def add_task(task):
