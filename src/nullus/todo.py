@@ -154,6 +154,20 @@ def schedule_task(date, task_ids):
     list_tasks()
 
 
+def update_task(task_id, new_desc):
+    tasks = load_tasks()
+    tasks = tasks.with_columns(
+        pl.when(pl.col("id") == task_id)
+        .then(pl.lit(new_desc))
+        .otherwise(pl.col("desc"))
+        .alias("desc"),
+    )
+
+    save_tasks(tasks)
+
+    list_tasks()
+
+
 def set_deadline(date, task_ids):
     tasks = load_tasks()
     tasks = tasks.with_columns(
@@ -233,13 +247,17 @@ def list_tasks(regex=None):
                 )
 
                 sort_cols = ["is_pin", "status", "scheduled", "deadline"]
-                sort_order = [True, True, False, False]
+                sort_order = [True, True, True, True]
                 show_cols = ["pin", "id", "status", "desc"]
 
             else:
                 sort_cols = ["status", "scheduled", "deadline"]
-                sort_order = [True, False, False]
+                sort_order = [True, True, True]
                 show_cols = ["id", "status", "desc"]
+
+            task_to_print = task_to_print.with_columns(
+                pl.all().cast(pl.String).fill_null("")
+            )
 
             if any(task_to_print["scheduled"]):
                 show_cols.append("scheduled")
@@ -290,6 +308,14 @@ def main():
         nargs="+",
         metavar="TASK",
         help="add task(s) and reassign task id(s)",
+    )
+
+    group.add_argument(
+        "-u",
+        "--update",
+        nargs="+",
+        metavar=("TASK_ID", "DESC"),
+        help="update task description",
     )
 
     group.add_argument(
@@ -348,6 +374,16 @@ def main():
         for task in args.add:
             add_task(task)
 
+    if args.update:
+        if len(args.update) != 2:
+            print("Provide [TASK_ID, NEW_DESC]")
+
+            return
+
+        task_id, new_desc = args.update
+        task_id = int(task_id)
+        update_task(task_id, new_desc)
+
     if args.pin:
         pin_task(args.pin)
 
@@ -372,6 +408,8 @@ def main():
 
     if args.delete:
         toggle_delete(args.delete)
+
+    return
 
 
 if __name__ == "__main__":
