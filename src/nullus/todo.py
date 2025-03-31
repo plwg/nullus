@@ -226,7 +226,7 @@ def purge(task_ids):
 
 
 def dump_tasks(regex=None):
-    task_to_print = load_tasks()
+    task_to_print = load_tasks().collect()
 
     if regex:
         regex = regex.lower()
@@ -235,7 +235,7 @@ def dump_tasks(regex=None):
             pl.concat_str(pl.all().cast(pl.String), ignore_nulls=True)
             .str.to_lowercase()
             .str.contains(regex),
-        ).collect()
+        )
 
     with pl.Config(
         tbl_rows=-1,
