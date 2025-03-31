@@ -7,10 +7,12 @@ authors = [
     { name = "plwg", email = "56353330+plwg@users.noreply.github.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "polars>=1.26.0",
+]
 
 [project.scripts]
-nullus = "nullus.todo:main"
+nu = "nullus.todo:main"
 
 [build-system]
 requires = ["hatchling"]
