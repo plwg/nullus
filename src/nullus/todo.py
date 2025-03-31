@@ -22,7 +22,7 @@ SCHEMA = {
 
 def load_tasks():
     try:
-        tasks = pl.read_csv(DATA_PATH / TASKS_FILE, schema_overrides=SCHEMA)
+        tasks = pl.scan_csv(DATA_PATH / TASKS_FILE, schema_overrides=SCHEMA)
     except (FileNotFoundError, pl.exceptions.NoDataError):
         tasks = pl.DataFrame(
             {
@@ -37,35 +37,37 @@ def load_tasks():
                 "done_date": [],
             },
             schema_overrides=SCHEMA,
-        )
+        ).lazy()
     return tasks
 
 
 def save_tasks(tasks):
     DATA_PATH.mkdir(parents=True, exist_ok=True)
 
-    tasks.write_csv(DATA_PATH / TASKS_FILE)
+    tasks.collect().write_csv(DATA_PATH / TASKS_FILE)
 
 
-def add_task(task):
+def add_task(new_tasks):
     tasks = load_tasks()
 
-    task = pl.DataFrame(
+    num_new_tasks = len(new_tasks)
+
+    new_tasks = pl.DataFrame(
         {
-            "id": [None],
-            "status": ["TODO"],
-            "desc": [task.capitalize()],
-            "scheduled": [None],
-            "deadline": [None],
-            "created": [datetime.now()],
-            "is_visible": [True],
-            "is_pin": [False],
-            "done_date": [None],
+            "id": [None] * num_new_tasks,
+            "status": ["TODO"] * num_new_tasks,
+            "desc": [t.capitalize() for t in new_tasks],
+            "scheduled": [None] * num_new_tasks,
+            "deadline": [None] * num_new_tasks,
+            "created": [datetime.now()] * num_new_tasks,
+            "is_visible": [True] * num_new_tasks,
+            "is_pin": [False] * num_new_tasks,
+            "done_date": [None] * num_new_tasks,
         },
         schema_overrides=SCHEMA,
-    )
+    ).lazy()
 
-    tasks = pl.concat([tasks, task])
+    tasks = pl.concat([tasks, new_tasks])
 
     tasks = reindex(tasks)
 
@@ -248,7 +250,7 @@ def list_tasks(regex=None):
     """List all tasks or filter by regex."""
     tasks = load_tasks()
 
-    task_to_print = tasks.filter(pl.col("is_visible"))
+    task_to_print = tasks.filter(pl.col("is_visible")).collect()
 
     if regex:
         regex = regex.lower()
@@ -266,6 +268,7 @@ def list_tasks(regex=None):
             tbl_hide_column_data_types=True,
             set_tbl_hide_dataframe_shape=True,
         ):
+
             if any(task_to_print["is_pin"]):
                 task_to_print = task_to_print.with_columns(
                     pl.when(pl.col("is_pin"))
@@ -407,6 +410,8 @@ def main():
 
     args = parser.parse_args()
 
+    # breakpoint()
+
     if not any(vars(args).values()):
         list_tasks()
 
@@ -414,8 +419,7 @@ def main():
         list_tasks(args.list)
 
     if args.add:
-        for task in args.add:
-            add_task(task)
+        add_task(args.add)
 
     if args.update:
         task_id, new_desc = args.update
