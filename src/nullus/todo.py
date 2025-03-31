@@ -4,7 +4,8 @@ from pathlib import Path
 
 import polars as pl
 
-TASKS_FILE = Path("~/data/task.csv").expanduser()
+DATA_PATH = Path("~/.config/nullus/").expanduser()
+TASKS_FILE = "task.csv"
 
 SCHEMA = {
     "id": pl.Int64,
@@ -21,7 +22,7 @@ SCHEMA = {
 
 def load_tasks():
     try:
-        tasks = pl.read_csv(TASKS_FILE, schema_overrides=SCHEMA)
+        tasks = pl.read_csv(DATA_PATH / TASKS_FILE, schema_overrides=SCHEMA)
     except (FileNotFoundError, pl.exceptions.NoDataError):
         tasks = pl.DataFrame(
             {
@@ -41,6 +42,8 @@ def load_tasks():
 
 
 def save_tasks(tasks):
+    DATA_PATH.mkdir(parents=True, exist_ok=True)
+
     tasks.write_csv(TASKS_FILE)
 
 
