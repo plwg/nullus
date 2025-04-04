@@ -21,8 +21,7 @@ SCHEMA = {
 
 
 def load_tasks():
-
-    data_file_path =  DATA_PATH / TASKS_FILE
+    data_file_path = DATA_PATH / TASKS_FILE
 
     if data_file_path.exists():
         tasks = pl.scan_csv(data_file_path, schema_overrides=SCHEMA)
