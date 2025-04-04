@@ -21,8 +21,11 @@ SCHEMA = {
 
 
 def load_tasks():
-    if (DATA_PATH / TASKS_FILE).exists():
-        tasks = pl.scan_csv(DATA_PATH / TASKS_FILE, schema_overrides=SCHEMA)
+
+    data_file_path =  DATA_PATH / TASKS_FILE
+
+    if data_file_path.exists():
+        tasks = pl.scan_csv(data_file_path, schema_overrides=SCHEMA)
     else:
         tasks = pl.DataFrame(
             {
@@ -38,7 +41,7 @@ def load_tasks():
             },
             schema_overrides=SCHEMA,
         )
-        tasks.write_csv(DATA_PATH / TASKS_FILE)
+        tasks.write_csv(data_file_path)
         tasks = tasks.lazy()
     return tasks
 
