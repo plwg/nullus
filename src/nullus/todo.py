@@ -242,6 +242,7 @@ def dump_tasks(regex=None):
         tbl_cols=-1,
         tbl_hide_column_data_types=True,
         set_tbl_hide_dataframe_shape=True,
+        set_fmt_str_lengths=80,
     ):
         print(task_to_print)
 
@@ -267,6 +268,7 @@ def list_tasks(regex=None):
             tbl_cols=-1,
             tbl_hide_column_data_types=True,
             set_tbl_hide_dataframe_shape=True,
+            set_fmt_str_lengths=80,
         ):
             if any(task_to_print["is_pin"]):
                 task_to_print = task_to_print.with_columns(
