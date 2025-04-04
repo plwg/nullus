@@ -21,9 +21,9 @@ SCHEMA = {
 
 
 def load_tasks():
-    try:
+    if (DATA_PATH / TASKS_FILE).exists():
         tasks = pl.scan_csv(DATA_PATH / TASKS_FILE, schema_overrides=SCHEMA)
-    except (FileNotFoundError, pl.exceptions.NoDataError):
+    else:
         tasks = pl.DataFrame(
             {
                 "id": [],
@@ -37,7 +37,9 @@ def load_tasks():
                 "done_date": [],
             },
             schema_overrides=SCHEMA,
-        ).lazy()
+        )
+        tasks.write_csv(DATA_PATH / TASKS_FILE)
+        tasks = tasks.lazy()
     return tasks
 
 
