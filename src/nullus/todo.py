@@ -10,8 +10,8 @@ DATA_PATH = Path("~/.config/nullus/").expanduser()
 TASKS_FILE = "task.db"
 
 SCHEMA = {
-    "perma_id": pl.String,
     "id": pl.Int64,
+    "perma_id": pl.String,
     "status": pl.String,
     "desc": pl.String,
     "scheduled": pl.String,
@@ -33,7 +33,8 @@ def load_tasks():
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER,
+            id INTEGER PRIMARY KEY,
+            perma_id TEXT,
             status TEXT CHECK(status IN ('DONE', 'TODO')),
             desc TEXT,
             scheduled TEXT,
@@ -41,8 +42,7 @@ def load_tasks():
             created TEXT,
             is_visible INTEGER,
             is_pin INTEGER,
-            done_date TEXT,
-            perma_id INTEGER PIMARY KEY
+            done_date TEXT
         )
     """)
 
@@ -70,8 +70,8 @@ def save_tasks(tasks):
 
     for row in tasks.collect().iter_rows():
         cursor.execute(
-            "INSERT INTO tasks (id, status, desc, scheduled, deadline, created, is_visible, is_pin, done_date, perma_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            row,
+            "INSERT INTO tasks (perma_id, status, desc, scheduled, deadline, created, is_visible, is_pin, done_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            row[1:],
         )
 
     conn.commit()
@@ -86,7 +86,8 @@ def add_task(new_tasks):
 
     new_tasks = pl.DataFrame(
         {
-            "id": list(range(1, num_new_tasks + 1)),
+            "id": [None] * num_new_tasks,
+            "perma_id": [str(uuid.uuid4()) for i in range(num_new_tasks)],
             "status": ["TODO"] * num_new_tasks,
             "desc": [t.capitalize() for t in new_tasks],
             "scheduled": [None] * num_new_tasks,
@@ -95,7 +96,6 @@ def add_task(new_tasks):
             "is_visible": [True] * num_new_tasks,
             "is_pin": [False] * num_new_tasks,
             "done_date": [None] * num_new_tasks,
-            "perma_id": [str(uuid.uuid4()) for i in range(num_new_tasks)],
         },
         schema_overrides=SCHEMA,
     ).lazy()
