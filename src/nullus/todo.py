@@ -1,15 +1,16 @@
 import argparse
+import sqlite3
+import uuid
 from datetime import datetime
 from pathlib import Path
 
 import polars as pl
 
-import sqlite3
-
 DATA_PATH = Path("~/.config/nullus/").expanduser()
 TASKS_FILE = "task.db"
 
 SCHEMA = {
+    "perma_id": pl.String,
     "id": pl.Int64,
     "status": pl.String,
     "desc": pl.String,
@@ -21,8 +22,8 @@ SCHEMA = {
     "done_date": pl.String,
 }
 
-def load_tasks():
 
+def load_tasks():
     DATA_PATH.mkdir(parents=True, exist_ok=True)
     data_file_path = DATA_PATH / TASKS_FILE
 
@@ -30,9 +31,9 @@ def load_tasks():
 
     cursor = conn.cursor()
 
-    cursor.execute('''
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY,
+            id INTEGER,
             status TEXT CHECK(status IN ('DONE', 'TODO')),
             desc TEXT,
             scheduled TEXT,
@@ -40,15 +41,18 @@ def load_tasks():
             created TEXT,
             is_visible INTEGER,
             is_pin INTEGER,
-            done_date TEXT
+            done_date TEXT,
+            perma_id INTEGER PIMARY KEY
         )
-    ''')
+    """)
 
     conn.commit()
 
-    query= "SELECT * FROM tasks"
+    query = "SELECT * FROM tasks"
 
-    tasks = pl.read_database(query=query, connection = conn, schema_overrides = SCHEMA).lazy()
+    tasks = pl.read_database(
+        query=query, connection=conn, schema_overrides=SCHEMA,
+    ).lazy()
 
     conn.close()
 
@@ -56,7 +60,6 @@ def load_tasks():
 
 
 def save_tasks(tasks):
-
     data_file_path = DATA_PATH / TASKS_FILE
 
     conn = sqlite3.connect(data_file_path)
@@ -66,12 +69,15 @@ def save_tasks(tasks):
     cursor.execute("DELETE FROM tasks")
 
     for row in tasks.collect().iter_rows():
-
-        cursor.execute("INSERT INTO tasks (status, desc, scheduled, deadline, created, is_visible, is_pin, done_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", row[1:])
+        cursor.execute(
+            "INSERT INTO tasks (id, status, desc, scheduled, deadline, created, is_visible, is_pin, done_date, perma_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            row,
+        )
 
     conn.commit()
 
     conn.close()
+
 
 def add_task(new_tasks):
     tasks = load_tasks()
@@ -80,7 +86,7 @@ def add_task(new_tasks):
 
     new_tasks = pl.DataFrame(
         {
-            "id": [None] * num_new_tasks,
+            "id": list(range(1, num_new_tasks + 1)),
             "status": ["TODO"] * num_new_tasks,
             "desc": [t.capitalize() for t in new_tasks],
             "scheduled": [None] * num_new_tasks,
@@ -89,6 +95,7 @@ def add_task(new_tasks):
             "is_visible": [True] * num_new_tasks,
             "is_pin": [False] * num_new_tasks,
             "done_date": [None] * num_new_tasks,
+            "perma_id": [str(uuid.uuid4()) for i in range(num_new_tasks)],
         },
         schema_overrides=SCHEMA,
     ).lazy()
@@ -314,7 +321,7 @@ def list_tasks(regex=None):
                 show_cols = ["id", "status", "desc"]
 
             task_to_print = task_to_print.with_columns(
-                pl.all().cast(pl.String).fill_null("")
+                pl.all().cast(pl.String).fill_null(""),
             )
 
             if any(task_to_print["scheduled"]):
@@ -483,7 +490,6 @@ def main():
         task_ids = list(map(int, args.purge))
         purge(task_ids)
 
-    return
 
 
 if __name__ == "__main__":
