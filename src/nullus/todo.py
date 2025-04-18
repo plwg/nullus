@@ -40,8 +40,8 @@ def load_tasks():
             scheduled TEXT,
             deadline TEXT,
             created TEXT,
-            is_visible INTEGER,
-            is_pin INTEGER,
+            is_visible INTEGER CHECK(is_visible IN (0, 1)),
+            is_pin INTEGER CHECK(is_pin IN (0, 1)),
             done_date TEXT
         )
     """)
