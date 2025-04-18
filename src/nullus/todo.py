@@ -4,52 +4,74 @@ from pathlib import Path
 
 import polars as pl
 
+import sqlite3
+
 DATA_PATH = Path("~/.config/nullus/").expanduser()
-TASKS_FILE = "task.csv"
+TASKS_FILE = "task.db"
 
 SCHEMA = {
     "id": pl.Int64,
-    "status": pl.Enum(["DONE", "TODO"]),
+    "status": pl.String,
     "desc": pl.String,
-    "scheduled": pl.Date,
-    "deadline": pl.Date,
-    "created": pl.Datetime,
+    "scheduled": pl.String,
+    "deadline": pl.String,
+    "created": pl.String,
     "is_visible": pl.Boolean,
     "is_pin": pl.Boolean,
-    "done_date": pl.Date,
+    "done_date": pl.String,
 }
 
-
 def load_tasks():
+
+    DATA_PATH.mkdir(parents=True, exist_ok=True)
     data_file_path = DATA_PATH / TASKS_FILE
 
-    if data_file_path.exists():
-        tasks = pl.scan_csv(data_file_path, schema_overrides=SCHEMA)
-    else:
-        tasks = pl.DataFrame(
-            {
-                "id": [],
-                "status": [],
-                "desc": [],
-                "scheduled": [],
-                "deadline": [],
-                "created": [],
-                "is_visible": [],
-                "is_pin": [],
-                "done_date": [],
-            },
-            schema_overrides=SCHEMA,
+    conn = sqlite3.connect(data_file_path)
+
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY,
+            status TEXT CHECK(status IN ('DONE', 'TODO')),
+            desc TEXT,
+            scheduled TEXT,
+            deadline TEXT,
+            created TEXT,
+            is_visible INTEGER,
+            is_pin INTEGER,
+            done_date TEXT
         )
-        tasks.write_csv(data_file_path)
-        tasks = tasks.lazy()
+    ''')
+
+    conn.commit()
+
+    query= "SELECT * FROM tasks"
+
+    tasks = pl.read_database(query=query, connection = conn, schema_overrides = SCHEMA).lazy()
+
+    conn.close()
+
     return tasks
 
 
 def save_tasks(tasks):
-    DATA_PATH.mkdir(parents=True, exist_ok=True)
 
-    tasks.collect().write_csv(DATA_PATH / TASKS_FILE)
+    data_file_path = DATA_PATH / TASKS_FILE
 
+    conn = sqlite3.connect(data_file_path)
+
+    cursor = conn.cursor()
+
+    cursor.execute("DELETE FROM tasks")
+
+    for row in tasks.collect().iter_rows():
+
+        cursor.execute("INSERT INTO tasks (status, desc, scheduled, deadline, created, is_visible, is_pin, done_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", row[1:])
+
+    conn.commit()
+
+    conn.close()
 
 def add_task(new_tasks):
     tasks = load_tasks()
@@ -63,7 +85,7 @@ def add_task(new_tasks):
             "desc": [t.capitalize() for t in new_tasks],
             "scheduled": [None] * num_new_tasks,
             "deadline": [None] * num_new_tasks,
-            "created": [datetime.now()] * num_new_tasks,
+            "created": [datetime.now().isoformat()] * num_new_tasks,
             "is_visible": [True] * num_new_tasks,
             "is_pin": [False] * num_new_tasks,
             "done_date": [None] * num_new_tasks,
@@ -123,7 +145,7 @@ def toggle_done(task_ids):
         pl.when(pl.col("id").is_in(task_ids), pl.col("status") == "DONE")
         .then(pl.lit(None))
         .when(pl.col("id").is_in(task_ids), ~(pl.col("status") == "DONE"))
-        .then(pl.lit(datetime.now().date()))
+        .then(pl.lit(datetime.now().date().isoformat()))
         .otherwise(pl.col("done_date"))
         .alias("done_date"),
     )
@@ -153,7 +175,7 @@ def schedule_task(date, task_ids):
     tasks = load_tasks()
     tasks = tasks.with_columns(
         pl.when(pl.col("id").is_in(task_ids))
-        .then(pl.lit(date).cast(pl.Date))
+        .then(pl.lit(date))
         .otherwise(pl.col("scheduled"))
         .alias("scheduled"),
     )
@@ -181,7 +203,7 @@ def set_deadline(date, task_ids):
     tasks = load_tasks()
     tasks = tasks.with_columns(
         pl.when(pl.col("id").is_in(task_ids))
-        .then(pl.lit(date).cast(pl.Date))
+        .then(pl.lit(date))
         .otherwise(pl.col("deadline"))
         .alias("deadline"),
     )
