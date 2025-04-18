@@ -33,8 +33,8 @@ def load_tasks():
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY,
-            perma_id TEXT,
+            id INTEGER,
+            perma_id TEXT PRIMARY KEY,
             status TEXT CHECK(status IN ('DONE', 'TODO')),
             desc TEXT,
             scheduled TEXT,
@@ -51,7 +51,9 @@ def load_tasks():
     query = "SELECT * FROM tasks"
 
     tasks = pl.read_database(
-        query=query, connection=conn, schema_overrides=SCHEMA,
+        query=query,
+        connection=conn,
+        schema_overrides=SCHEMA,
     ).lazy()
 
     conn.close()
@@ -70,8 +72,8 @@ def save_tasks(tasks):
 
     for row in tasks.collect().iter_rows():
         cursor.execute(
-            "INSERT INTO tasks (perma_id, status, desc, scheduled, deadline, created, is_visible, is_pin, done_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            row[1:],
+            "INSERT INTO tasks (id, perma_id, status, desc, scheduled, deadline, created, is_visible, is_pin, done_date) VALUES (?,?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            row,
         )
 
     conn.commit()
@@ -86,7 +88,6 @@ def add_task(new_tasks):
 
     new_tasks = pl.DataFrame(
         {
-            "id": [None] * num_new_tasks,
             "perma_id": [str(uuid.uuid4()) for i in range(num_new_tasks)],
             "status": ["TODO"] * num_new_tasks,
             "desc": [t.capitalize() for t in new_tasks],
@@ -100,7 +101,7 @@ def add_task(new_tasks):
         schema_overrides=SCHEMA,
     ).lazy()
 
-    tasks = pl.concat([tasks, new_tasks])
+    tasks = pl.concat([tasks.drop("id"), new_tasks])
 
     tasks = reindex(tasks)
 
@@ -226,7 +227,7 @@ def reindex(tasks):
             ["is_visible", "is_pin", "status", "scheduled", "deadline"],
             descending=[True, True, True, False, False],
         )
-        .drop("id")
+        .drop("id", strict=False)
         .with_row_index("id", offset=1)
     )
 
@@ -489,7 +490,6 @@ def main():
     if args.purge:
         task_ids = list(map(int, args.purge))
         purge(task_ids)
-
 
 
 if __name__ == "__main__":
