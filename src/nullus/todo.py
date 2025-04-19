@@ -437,8 +437,8 @@ def list_tasks(conn, regex=None):
     else:
         print("No active tasks found.")
 
-def parse_list_of_int(list_of_int):
 
+def parse_list_of_int(list_of_int):
     return [int(s) for s in list_of_int]
 
 
