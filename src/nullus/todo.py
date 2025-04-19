@@ -58,7 +58,7 @@ def save_tasks(tasks, conn):
 
     for row in tasks.collect().iter_rows():
         cursor.execute(
-            "INSERT INTO tasks (id, perma_id, status, desc, scheduled, deadline, created, is_visible, is_pin, done_date) VALUES (?,?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            f"INSERT INTO tasks (id, perma_id, status, desc, scheduled, deadline, created, is_visible, is_pin, done_date) VALUES ({','.join(['?' for _ in row])})",
             row,
         )
 
@@ -606,7 +606,7 @@ def main():
         toggle_delete(args.delete, conn)
 
     if args.purge:
-        task_ids = parse_list_of_int(task_ids)
+        task_ids = parse_list_of_int(args.purge)
         purge(task_ids, conn)
 
     conn.commit()
