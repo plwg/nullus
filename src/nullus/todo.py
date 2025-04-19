@@ -2,6 +2,7 @@ import argparse
 import sqlite3
 import uuid
 from datetime import datetime
+from itertools import product
 from pathlib import Path
 
 import polars as pl
@@ -106,6 +107,80 @@ def add_task(new_tasks):
     tasks = reindex(tasks)
 
     save_tasks(tasks)
+
+    list_tasks()
+
+
+def tag_tasks(task_ids, tags):
+    tags = tags.split(",")
+
+    DATA_PATH.mkdir(parents=True, exist_ok=True)
+    data_file_path = DATA_PATH / TASKS_FILE
+
+    conn = sqlite3.connect(data_file_path)
+
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tags (
+            tag_id INTEGER PRIMARY KEY,
+            tag_desc TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS task_tag (
+            task_perma_id TEXT,
+            tag_id INTEGER,
+            FOREIGN KEY(task_perma_id) REFERENCES tasks(perma_id),
+            FOREIGN KEY(tag_id) REFERENCES tags(tag_id)
+        )
+    """)
+
+    tags_with_ids = []
+
+    for tag in tags:
+        query = f"SELECT * FROM tags WHERE tag_desc = '{tag}'"
+
+        res = cursor.execute(query).fetchone()
+
+        if not res:
+            cursor.execute(
+                "INSERT INTO tags (tag_desc) VALUES (?)",
+                [tag],
+            )
+
+            res = cursor.execute(query).fetchone()
+
+        tags_with_ids.append(res)
+
+    tags_with_ids = [t[0] for t in tags_with_ids]
+
+    tasks_perma_id_to_tag = cursor.execute(
+        "SELECT perma_id from tasks WHERE id IN (%s)" % ",".join("?" for i in task_ids),
+        task_ids,
+    ).fetchall()
+
+    tasks_perma_id_to_tag = [perma_id[0] for perma_id in tasks_perma_id_to_tag]
+
+    for task_perma_id, tag_id in product(tasks_perma_id_to_tag, tags_with_ids):
+        query = f"SELECT * FROM task_tag WHERE task_perma_id = '{task_perma_id}' AND tag_id = '{tag_id}'"
+
+        res = cursor.execute(query).fetchone()
+
+        if res:
+            cursor.execute(
+                f"DELETE FROM task_tag WHERE task_perma_id = '{task_perma_id}' AND tag_id = '{tag_id}'"
+            )
+
+        else:
+            cursor.execute(
+                "INSERT INTO task_tag (task_perma_id, tag_id) VALUES (?,?)",
+                (task_perma_id, tag_id),
+            )
+
+    conn.commit()
+    conn.close()
 
     list_tasks()
 
@@ -259,8 +334,48 @@ def purge(task_ids):
     list_tasks()
 
 
+def load_view():
+    DATA_PATH.mkdir(parents=True, exist_ok=True)
+    data_file_path = DATA_PATH / TASKS_FILE
+
+    conn = sqlite3.connect(data_file_path)
+
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE VIEW IF NOT EXISTS tasks_with_tag AS
+        SELECT tasks.*,
+        tags.tag_desc
+        FROM tasks
+        LEFT JOIN task_tag on tasks.perma_id = task_tag.task_perma_id
+        LEFT JOIN tags on task_tag.tag_id = tags.tag_id
+    """)
+
+    conn.commit()
+
+    query = "SELECT * FROM tasks_with_tag"
+
+    tasks = pl.read_database(
+        query=query, connection=conn, schema_overrides=SCHEMA | {"tag_desc": pl.String}
+    )
+    conn.close()
+
+    concat_task_tag = (
+        tasks.group_by("id")
+        .agg(pl.col("tag_desc"))
+        .with_columns(pl.col("tag_desc").list.join(", ").alias("tags"))
+        .drop("tag_desc")
+    )
+
+    tasks = tasks.drop("tag_desc").join(
+        concat_task_tag, on="id", how="inner", validate="1:1"
+    )
+
+    return tasks
+
+
 def dump_tasks(regex=None):
-    task_to_print = load_tasks().collect()
+    task_to_print = load_view()
 
     if regex:
         regex = regex.lower()
@@ -283,9 +398,9 @@ def dump_tasks(regex=None):
 
 def list_tasks(regex=None):
     """List all tasks or filter by regex."""
-    tasks = load_tasks()
+    tasks = load_view()
 
-    task_to_print = tasks.filter(pl.col("is_visible")).collect()
+    task_to_print = tasks.filter(pl.col("is_visible"))
 
     if regex:
         regex = regex.lower()
@@ -314,12 +429,12 @@ def list_tasks(regex=None):
 
                 sort_cols = ["is_pin", "status", "scheduled", "deadline"]
                 sort_order = [True, True, True, True]
-                show_cols = ["pin", "id", "status", "desc"]
+                show_cols = ["pin", "id", "status", "desc", "tags"]
 
             else:
                 sort_cols = ["status", "scheduled", "deadline"]
                 sort_order = [True, True, True]
-                show_cols = ["id", "status", "desc"]
+                show_cols = ["id", "status", "desc", "tags"]
 
             task_to_print = task_to_print.with_columns(
                 pl.all().cast(pl.String).fill_null(""),
@@ -365,6 +480,14 @@ def main():
         nargs="+",
         metavar="TASK",
         help="add task(s) and reassign task id(s)",
+    )
+
+    group.add_argument(
+        "-t",
+        "--tag",
+        nargs="+",
+        metavar=("TASK_IDS", "TAGS"),
+        help="add/remove tag(s) to tasks(s)",
     )
 
     group.add_argument(
@@ -453,6 +576,11 @@ def main():
 
     if args.add:
         add_task(args.add)
+
+    if args.tag:
+        *task_ids, tags = args.tag
+        task_ids = list(map(int, task_ids))
+        tag_tasks(task_ids, tags)
 
     if args.update:
         task_id, new_desc = args.update
