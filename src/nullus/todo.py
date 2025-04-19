@@ -489,6 +489,15 @@ def main():
     )
 
     group.add_argument(
+        "-p",
+        "--pin",
+        nargs="+",
+        metavar="TASK_ID",
+        type=int,
+        help="pin task(s)",
+    )
+
+    group.add_argument(
         "-d",
         "--done",
         nargs="+",
@@ -510,15 +519,6 @@ def main():
         nargs="+",
         metavar=("DATE", "TASK_ID"),
         help="give task(s) a deadline (YYYY-MM-DD)",
-    )
-
-    group.add_argument(
-        "-p",
-        "--pin",
-        nargs="+",
-        metavar="TASK_ID",
-        type=int,
-        help="pin task(s)",
     )
 
     group.add_argument(
