@@ -437,6 +437,10 @@ def list_tasks(conn, regex=None):
     else:
         print("No active tasks found.")
 
+def parse_list_of_int(list_of_int):
+
+    return [int(s) for s in list_of_int]
+
 
 def main():
     DATA_PATH = Path("~/.config/nullus/").expanduser()
@@ -565,7 +569,7 @@ def main():
 
     if args.tag:
         *task_ids, tags = args.tag
-        task_ids = list(map(int, task_ids))
+        task_ids = parse_list_of_int(task_ids)
         tag_tasks(task_ids, tags, conn)
 
     if args.update:
@@ -581,12 +585,12 @@ def main():
 
     if args.schedule:
         date, *task_ids = args.schedule
-        task_ids = list(map(int, task_ids))
+        task_ids = parse_list_of_int(task_ids)
         schedule_task(date, task_ids, conn)
 
     if args.deadline:
         date, *task_ids = args.deadline
-        task_ids = list(map(int, task_ids))
+        task_ids = parse_list_of_int(task_ids)
         set_deadline(date, task_ids, conn)
 
     if args.prune:
@@ -602,7 +606,7 @@ def main():
         toggle_delete(args.delete, conn)
 
     if args.purge:
-        task_ids = list(map(int, args.purge))
+        task_ids = parse_list_of_int(task_ids)
         purge(task_ids, conn)
 
     conn.commit()
