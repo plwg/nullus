@@ -1,69 +1,81 @@
 import argparse
+import sqlite3
+import uuid
 from datetime import datetime
+from itertools import product
 from pathlib import Path
 
 import polars as pl
 
-DATA_PATH = Path("~/.config/nullus/").expanduser()
-TASKS_FILE = "task.csv"
 
 SCHEMA = {
     "id": pl.Int64,
-    "status": pl.Enum(["DONE", "TODO"]),
+    "perma_id": pl.String,
+    "status": pl.String,
     "desc": pl.String,
-    "scheduled": pl.Date,
-    "deadline": pl.Date,
-    "created": pl.Datetime,
+    "scheduled": pl.String,
+    "deadline": pl.String,
+    "created": pl.String,
     "is_visible": pl.Boolean,
     "is_pin": pl.Boolean,
-    "done_date": pl.Date,
+    "done_date": pl.String,
 }
 
 
-def load_tasks():
-    data_file_path = DATA_PATH / TASKS_FILE
+def load_tasks(conn):
+    cursor = conn.cursor()
 
-    if data_file_path.exists():
-        tasks = pl.scan_csv(data_file_path, schema_overrides=SCHEMA)
-    else:
-        tasks = pl.DataFrame(
-            {
-                "id": [],
-                "status": [],
-                "desc": [],
-                "scheduled": [],
-                "deadline": [],
-                "created": [],
-                "is_visible": [],
-                "is_pin": [],
-                "done_date": [],
-            },
-            schema_overrides=SCHEMA,
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER,
+            perma_id TEXT PRIMARY KEY,
+            status TEXT CHECK(status IN ('DONE', 'TODO')),
+            desc TEXT,
+            scheduled TEXT,
+            deadline TEXT,
+            created TEXT,
+            is_visible INTEGER CHECK(is_visible IN (0, 1)),
+            is_pin INTEGER CHECK(is_pin IN (0, 1)),
+            done_date TEXT
         )
-        tasks.write_csv(data_file_path)
-        tasks = tasks.lazy()
+    """)
+
+    query = "SELECT * FROM tasks"
+
+    tasks = pl.read_database(
+        query=query,
+        connection=conn,
+        schema_overrides=SCHEMA,
+    ).lazy()
+
     return tasks
 
 
-def save_tasks(tasks):
-    DATA_PATH.mkdir(parents=True, exist_ok=True)
+def save_tasks(tasks, conn):
+    cursor = conn.cursor()
 
-    tasks.collect().write_csv(DATA_PATH / TASKS_FILE)
+    cursor.execute("DELETE FROM tasks")
+
+    for row in tasks.collect().iter_rows():
+        cursor.execute(
+            f"INSERT INTO tasks (id, perma_id, status, desc, scheduled, deadline, created, is_visible, is_pin, done_date) VALUES ({','.join(['?' for _ in row])})",
+            row,
+        )
 
 
-def add_task(new_tasks):
-    tasks = load_tasks()
+def add_task(new_tasks, conn):
+    tasks = load_tasks(conn)
 
     num_new_tasks = len(new_tasks)
 
     new_tasks = pl.DataFrame(
         {
-            "id": [None] * num_new_tasks,
+            "perma_id": [str(uuid.uuid4()) for i in range(num_new_tasks)],
             "status": ["TODO"] * num_new_tasks,
             "desc": [t.capitalize() for t in new_tasks],
             "scheduled": [None] * num_new_tasks,
             "deadline": [None] * num_new_tasks,
-            "created": [datetime.now()] * num_new_tasks,
+            "created": [datetime.now().isoformat()] * num_new_tasks,
             "is_visible": [True] * num_new_tasks,
             "is_pin": [False] * num_new_tasks,
             "done_date": [None] * num_new_tasks,
@@ -71,17 +83,86 @@ def add_task(new_tasks):
         schema_overrides=SCHEMA,
     ).lazy()
 
-    tasks = pl.concat([tasks, new_tasks])
+    tasks = pl.concat([tasks.drop("id"), new_tasks])
 
     tasks = reindex(tasks)
 
-    save_tasks(tasks)
+    save_tasks(tasks, conn)
 
-    list_tasks()
+    list_tasks(conn)
 
 
-def pin_task(task_ids):
-    tasks = load_tasks()
+def tag_tasks(task_ids, tags, conn):
+    tags = tags.split(",")
+
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tags (
+            tag_id INTEGER PRIMARY KEY,
+            tag_desc TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS task_tag (
+            task_perma_id TEXT,
+            tag_id INTEGER,
+            FOREIGN KEY(task_perma_id) REFERENCES tasks(perma_id)
+                DEFERRABLE INITIALLY DEFERRED,
+            FOREIGN KEY(tag_id) REFERENCES tags(tag_id)
+                DEFERRABLE INITIALLY DEFERRED
+        )
+    """)
+
+    tags_with_ids = []
+
+    for tag in tags:
+        query = "SELECT * FROM tags WHERE tag_desc = '?'"
+
+        res = cursor.execute(query, [tag]).fetchone()
+
+        if not res:
+            cursor.execute(
+                "INSERT INTO tags (tag_desc) VALUES (?)",
+                [tag],
+            )
+
+            res = cursor.execute(query, [tag]).fetchone()
+
+        tags_with_ids.append(res)
+
+    tags_with_ids = [t[0] for t in tags_with_ids]
+
+    tasks_perma_id_to_tag = cursor.execute(
+        "SELECT perma_id from tasks WHERE id IN (%s)" % ",".join("?" for i in task_ids),
+        task_ids,
+    ).fetchall()
+
+    tasks_perma_id_to_tag = [perma_id[0] for perma_id in tasks_perma_id_to_tag]
+
+    for task_perma_id, tag_id in product(tasks_perma_id_to_tag, tags_with_ids):
+        query = "SELECT * FROM task_tag WHERE task_perma_id = '?'' AND tag_id = '?'"
+
+        res = cursor.execute(query, (task_perma_id, tag_id)).fetchone()
+
+        if res:
+            cursor.execute(
+                "DELETE FROM task_tag WHERE task_perma_id = '?' AND tag_id = '?'",
+                (task_perma_id, tag_id),
+            )
+
+        else:
+            cursor.execute(
+                "INSERT INTO task_tag (task_perma_id, tag_id) VALUES (?,?)",
+                (task_perma_id, tag_id),
+            )
+
+    list_tasks(conn)
+
+
+def pin_task(task_ids, conn):
+    tasks = load_tasks(conn)
 
     tasks = tasks.with_columns(
         pl.when(pl.col("id").is_in(task_ids), pl.col("is_pin"))
@@ -92,13 +173,13 @@ def pin_task(task_ids):
         .alias("is_pin"),
     )
 
-    save_tasks(tasks)
+    save_tasks(tasks, conn)
 
-    list_tasks()
+    list_tasks(conn)
 
 
-def toggle_delete(task_ids):
-    tasks = load_tasks()
+def toggle_delete(task_ids, conn):
+    tasks = load_tasks(conn)
 
     tasks = tasks.with_columns(
         pl.when(pl.col("id").is_in(task_ids), pl.col("is_visible"))
@@ -111,19 +192,19 @@ def toggle_delete(task_ids):
 
     tasks = reindex(tasks)
 
-    save_tasks(tasks)
+    save_tasks(tasks, conn)
 
-    list_tasks()
+    list_tasks(conn)
 
 
-def toggle_done(task_ids):
-    tasks = load_tasks()
+def toggle_done(task_ids, conn):
+    tasks = load_tasks(conn)
 
     tasks = tasks.with_columns(
         pl.when(pl.col("id").is_in(task_ids), pl.col("status") == "DONE")
         .then(pl.lit(None))
         .when(pl.col("id").is_in(task_ids), ~(pl.col("status") == "DONE"))
-        .then(pl.lit(datetime.now().date()))
+        .then(pl.lit(datetime.now().date().isoformat()))
         .otherwise(pl.col("done_date"))
         .alias("done_date"),
     )
@@ -144,27 +225,27 @@ def toggle_done(task_ids):
         .alias("is_visible"),
     )
 
-    save_tasks(tasks)
+    save_tasks(tasks, conn)
 
-    list_tasks()
+    list_tasks(conn)
 
 
-def schedule_task(date, task_ids):
-    tasks = load_tasks()
+def schedule_task(date, task_ids, conn):
+    tasks = load_tasks(conn)
     tasks = tasks.with_columns(
         pl.when(pl.col("id").is_in(task_ids))
-        .then(pl.lit(date).cast(pl.Date))
+        .then(pl.lit(date))
         .otherwise(pl.col("scheduled"))
         .alias("scheduled"),
     )
 
-    save_tasks(tasks)
+    save_tasks(tasks, conn)
 
-    list_tasks()
+    list_tasks(conn)
 
 
-def update_task(task_id, new_desc):
-    tasks = load_tasks()
+def update_task(task_id, new_desc, conn):
+    tasks = load_tasks(conn)
     tasks = tasks.with_columns(
         pl.when(pl.col("id") == task_id)
         .then(pl.lit(new_desc))
@@ -172,23 +253,23 @@ def update_task(task_id, new_desc):
         .alias("desc"),
     )
 
-    save_tasks(tasks)
+    save_tasks(tasks, conn)
 
-    list_tasks()
+    list_tasks(conn)
 
 
-def set_deadline(date, task_ids):
-    tasks = load_tasks()
+def set_deadline(date, task_ids, conn):
+    tasks = load_tasks(conn)
     tasks = tasks.with_columns(
         pl.when(pl.col("id").is_in(task_ids))
-        .then(pl.lit(date).cast(pl.Date))
+        .then(pl.lit(date))
         .otherwise(pl.col("deadline"))
         .alias("deadline"),
     )
 
-    save_tasks(tasks)
+    save_tasks(tasks, conn)
 
-    list_tasks()
+    list_tasks(conn)
 
 
 def reindex(tasks):
@@ -197,15 +278,15 @@ def reindex(tasks):
             ["is_visible", "is_pin", "status", "scheduled", "deadline"],
             descending=[True, True, True, False, False],
         )
-        .drop("id")
+        .drop("id", strict=False)
         .with_row_index("id", offset=1)
     )
 
     return tasks
 
 
-def prune_done():
-    tasks = load_tasks()
+def prune_done(conn):
+    tasks = load_tasks(conn)
     tasks = tasks.with_columns(
         pl.when(pl.col("status") == "DONE")
         .then(pl.lit(False))
@@ -215,22 +296,66 @@ def prune_done():
 
     tasks = reindex(tasks)
 
-    save_tasks(tasks)
+    save_tasks(tasks, conn)
+    list_tasks(conn)
 
-    list_tasks()
 
+def purge(task_ids, conn):
+    cursor = conn.cursor()
 
-def purge(task_ids):
-    tasks = load_tasks()
+    tasks_perma_id_to_delete = cursor.execute(
+        f"SELECT perma_id from tasks WHERE id IN ({','.join('?' for i in task_ids)})",
+        task_ids,
+    ).fetchall()
+
+    tasks_perma_id_to_delete = [perma_id[0] for perma_id in tasks_perma_id_to_delete]
+
+    for task_perma_id in tasks_perma_id_to_delete:
+        cursor.execute(
+            "DELETE FROM task_tag WHERE task_perma_id = '?'", [task_perma_id]
+        )
+
+    tasks = load_tasks(conn)
     tasks = tasks.filter(~pl.col("id").is_in(task_ids))
     tasks = reindex(tasks)
-    save_tasks(tasks)
+    save_tasks(tasks, conn)
+    list_tasks(conn)
 
-    list_tasks()
+
+def load_view(conn):
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE VIEW IF NOT EXISTS tasks_with_tag AS
+        SELECT tasks.*,
+        tags.tag_desc
+        FROM tasks
+        LEFT JOIN task_tag on tasks.perma_id = task_tag.task_perma_id
+        LEFT JOIN tags on task_tag.tag_id = tags.tag_id
+    """)
+
+    query = "SELECT * FROM tasks_with_tag"
+
+    tasks = pl.read_database(
+        query=query, connection=conn, schema_overrides=SCHEMA | {"tag_desc": pl.String}
+    )
+
+    concat_task_tag = (
+        tasks.group_by("id")
+        .agg(pl.col("tag_desc"))
+        .with_columns(pl.col("tag_desc").list.join(", ").alias("tags"))
+        .drop("tag_desc")
+    )
+
+    tasks = tasks.drop("tag_desc").join(
+        concat_task_tag, on="id", how="inner", validate="1:1"
+    )
+
+    return tasks
 
 
-def dump_tasks(regex=None):
-    task_to_print = load_tasks().collect()
+def dump_tasks(conn, regex=None):
+    task_to_print = load_view(conn)
 
     if regex:
         regex = regex.lower()
@@ -251,11 +376,11 @@ def dump_tasks(regex=None):
         print(task_to_print)
 
 
-def list_tasks(regex=None):
+def list_tasks(conn, regex=None):
     """List all tasks or filter by regex."""
-    tasks = load_tasks()
+    tasks = load_view(conn)
 
-    task_to_print = tasks.filter(pl.col("is_visible")).collect()
+    task_to_print = tasks.filter(pl.col("is_visible"))
 
     if regex:
         regex = regex.lower()
@@ -284,15 +409,15 @@ def list_tasks(regex=None):
 
                 sort_cols = ["is_pin", "status", "scheduled", "deadline"]
                 sort_order = [True, True, True, True]
-                show_cols = ["pin", "id", "status", "desc"]
+                show_cols = ["pin", "id", "status", "desc", "tags"]
 
             else:
                 sort_cols = ["status", "scheduled", "deadline"]
                 sort_order = [True, True, True]
-                show_cols = ["id", "status", "desc"]
+                show_cols = ["id", "status", "desc", "tags"]
 
             task_to_print = task_to_print.with_columns(
-                pl.all().cast(pl.String).fill_null("")
+                pl.all().cast(pl.String).fill_null(""),
             )
 
             if any(task_to_print["scheduled"]):
@@ -316,7 +441,20 @@ def list_tasks(regex=None):
         print("No active tasks found.")
 
 
+def parse_list_of_int(list_of_int):
+    return [int(s) for s in list_of_int]
+
+
 def main():
+    DATA_PATH = Path("~/.config/nullus/").expanduser()
+    TASKS_FILE = "task.db"
+
+    data_file_path = DATA_PATH / TASKS_FILE
+
+    conn = sqlite3.connect(data_file_path)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA foreign_keys = ON")
+
     parser = argparse.ArgumentParser(description="CLI To-Do List")
     group = parser.add_mutually_exclusive_group()
 
@@ -338,11 +476,28 @@ def main():
     )
 
     group.add_argument(
+        "-t",
+        "--tag",
+        nargs="+",
+        metavar=("TASK_IDS", "TAGS"),
+        help="add/remove tag(s) to tasks(s)",
+    )
+
+    group.add_argument(
         "-u",
         "--update",
         nargs=2,
         metavar=("TASK_ID", "DESC"),
         help="update task description",
+    )
+
+    group.add_argument(
+        "-p",
+        "--pin",
+        nargs="+",
+        metavar="TASK_ID",
+        type=int,
+        help="pin task(s)",
     )
 
     group.add_argument(
@@ -367,15 +522,6 @@ def main():
         nargs="+",
         metavar=("DATE", "TASK_ID"),
         help="give task(s) a deadline (YYYY-MM-DD)",
-    )
-
-    group.add_argument(
-        "-p",
-        "--pin",
-        nargs="+",
-        metavar="TASK_ID",
-        type=int,
-        help="pin task(s)",
     )
 
     group.add_argument(
@@ -416,52 +562,58 @@ def main():
     args = parser.parse_args()
 
     if not any(vars(args).values()):
-        list_tasks()
+        list_tasks(conn)
 
     if args.list:
-        list_tasks(args.list)
+        list_tasks(conn, args.list)
 
     if args.add:
-        add_task(args.add)
+        add_task(args.add, conn)
+
+    if args.tag:
+        *task_ids, tags = args.tag
+        task_ids = parse_list_of_int(task_ids)
+        tag_tasks(task_ids, tags, conn)
 
     if args.update:
         task_id, new_desc = args.update
         task_id = int(task_id)
-        update_task(task_id, new_desc)
+        update_task(task_id, new_desc, conn)
 
     if args.pin:
-        pin_task(args.pin)
+        pin_task(args.pin, conn)
 
     if args.done:
-        toggle_done(args.done)
+        toggle_done(args.done, conn)
 
     if args.schedule:
         date, *task_ids = args.schedule
-        task_ids = list(map(int, task_ids))
-        schedule_task(date, task_ids)
+        task_ids = parse_list_of_int(task_ids)
+        schedule_task(date, task_ids, conn)
 
     if args.deadline:
         date, *task_ids = args.deadline
-        task_ids = list(map(int, task_ids))
-        set_deadline(date, task_ids)
+        task_ids = parse_list_of_int(task_ids)
+        set_deadline(date, task_ids, conn)
 
     if args.prune:
-        prune_done()
+        prune_done(conn)
 
     if args.dump:
-        dump_tasks()
+        dump_tasks(conn)
 
     if args.dumpr:
-        dump_tasks(args.dumpr[0])
+        dump_tasks(conn, args.dumpr[0])
 
     if args.delete:
-        toggle_delete(args.delete)
+        toggle_delete(args.delete, conn)
 
     if args.purge:
-        task_ids = list(map(int, args.purge))
-        purge(task_ids)
+        task_ids = parse_list_of_int(args.purge)
+        purge(task_ids, conn)
 
-    return
+    conn.commit()
+    conn.close()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 [project]
 name = "nullus"
-version = "0.1.0"
+version = "1.0.0"
 description = "Task management in the CLI"
 readme = "README.md"
 keywords = ["GTD", "cli"]
@@ -23,7 +23,7 @@ dependencies = [
 Repository = "https://github.com/plwg/nullus"
 
 [project.scripts]
-nu = "nullus.todo:main"
+nu = "nullus.main:main"
 
 [build-system]
 requires = ["hatchling"]
