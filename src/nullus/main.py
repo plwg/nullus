@@ -83,7 +83,7 @@ def tag_tasks(task_ids, tags, conn):
     tags_with_ids = []
 
     for tag in tags:
-        query = "SELECT * FROM tags WHERE tag_desc = '?'"
+        query = "SELECT * FROM tags WHERE tag_desc = ?"
 
         res = cursor.execute(query, [tag]).fetchone()
 
@@ -107,13 +107,13 @@ def tag_tasks(task_ids, tags, conn):
     tasks_perma_id_to_tag = [perma_id[0] for perma_id in tasks_perma_id_to_tag]
 
     for task_perma_id, tag_id in product(tasks_perma_id_to_tag, tags_with_ids):
-        query = "SELECT * FROM task_tag WHERE task_perma_id = '?'' AND tag_id = '?'"
+        query = "SELECT * FROM task_tag WHERE task_perma_id = ? AND tag_id = ?"
 
         res = cursor.execute(query, (task_perma_id, tag_id)).fetchone()
 
         if res:
             cursor.execute(
-                "DELETE FROM task_tag WHERE task_perma_id = '?' AND tag_id = '?'",
+                "DELETE FROM task_tag WHERE task_perma_id = ? AND tag_id = ?",
                 (task_perma_id, tag_id),
             )
 
@@ -276,9 +276,7 @@ def purge(task_ids, conn):
     tasks_perma_id_to_delete = [perma_id[0] for perma_id in tasks_perma_id_to_delete]
 
     for task_perma_id in tasks_perma_id_to_delete:
-        cursor.execute(
-            "DELETE FROM task_tag WHERE task_perma_id = '?'", [task_perma_id]
-        )
+        cursor.execute("DELETE FROM task_tag WHERE task_perma_id = ?", [task_perma_id])
 
     tasks = load_tasks(conn)
     tasks = tasks.filter(~pl.col("id").is_in(task_ids))
