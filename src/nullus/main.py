@@ -299,8 +299,11 @@ def load_view(conn):
         .drop("tag_desc")
     )
 
-    tasks = tasks.drop("tag_desc").join(
-        concat_task_tag, on="id", how="inner", validate="1:1"
+    tasks = (
+        tasks.drop("tag_desc")
+        .unique(subset=["id"])
+        .join(concat_task_tag, on="id", how="inner", validate="1:1")
+        .sort("id", descending=False)
     )
 
     return tasks
