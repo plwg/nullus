@@ -23,23 +23,6 @@ SCHEMA = {
 
 
 def load_tasks(conn):
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER,
-            perma_id TEXT PRIMARY KEY,
-            status TEXT CHECK(status IN ('DONE', 'TODO')),
-            desc TEXT,
-            scheduled TEXT,
-            deadline TEXT,
-            created TEXT,
-            is_visible INTEGER CHECK(is_visible IN (0, 1)),
-            is_pin INTEGER CHECK(is_pin IN (0, 1)),
-            done_date TEXT
-        )
-    """)
-
     query = "SELECT * FROM tasks"
 
     tasks = pl.read_database(
@@ -96,24 +79,6 @@ def tag_tasks(task_ids, tags, conn):
     tags = tags.split(",")
 
     cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tags (
-            tag_id INTEGER PRIMARY KEY,
-            tag_desc TEXT
-        )
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS task_tag (
-            task_perma_id TEXT,
-            tag_id INTEGER,
-            FOREIGN KEY(task_perma_id) REFERENCES tasks(perma_id)
-                DEFERRABLE INITIALLY DEFERRED,
-            FOREIGN KEY(tag_id) REFERENCES tags(tag_id)
-                DEFERRABLE INITIALLY DEFERRED
-        )
-    """)
 
     tags_with_ids = []
 
@@ -323,17 +288,6 @@ def purge(task_ids, conn):
 
 
 def load_view(conn):
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE VIEW IF NOT EXISTS tasks_with_tag AS
-        SELECT tasks.*,
-        tags.tag_desc
-        FROM tasks
-        LEFT JOIN task_tag on tasks.perma_id = task_tag.task_perma_id
-        LEFT JOIN tags on task_tag.tag_id = tags.tag_id
-    """)
-
     query = "SELECT * FROM tasks_with_tag"
 
     tasks = pl.read_database(
@@ -445,6 +399,52 @@ def parse_list_of_int(list_of_int):
     return [int(s) for s in list_of_int]
 
 
+def init_db(conn):
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER,
+            perma_id TEXT PRIMARY KEY,
+            status TEXT CHECK(status IN ('DONE', 'TODO')),
+            desc TEXT,
+            scheduled TEXT,
+            deadline TEXT,
+            created TEXT,
+            is_visible INTEGER CHECK(is_visible IN (0, 1)),
+            is_pin INTEGER CHECK(is_pin IN (0, 1)),
+            done_date TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tags (
+            tag_id INTEGER PRIMARY KEY,
+            tag_desc TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS task_tag (
+            task_perma_id TEXT,
+            tag_id INTEGER,
+            FOREIGN KEY(task_perma_id) REFERENCES tasks(perma_id)
+                DEFERRABLE INITIALLY DEFERRED,
+            FOREIGN KEY(tag_id) REFERENCES tags(tag_id)
+                DEFERRABLE INITIALLY DEFERRED
+        )
+    """)
+
+    cursor.execute("""
+        CREATE VIEW IF NOT EXISTS tasks_with_tag AS
+        SELECT tasks.*,
+        tags.tag_desc
+        FROM tasks
+        LEFT JOIN task_tag on tasks.perma_id = task_tag.task_perma_id
+        LEFT JOIN tags on task_tag.tag_id = tags.tag_id
+    """)
+
+
 def main():
     DATA_PATH = Path("~/.config/nullus/").expanduser()
     TASKS_FILE = "task.db"
@@ -454,6 +454,8 @@ def main():
     conn = sqlite3.connect(data_file_path)
     cursor = conn.cursor()
     cursor.execute("PRAGMA foreign_keys = ON")
+
+    init_db(conn)
 
     parser = argparse.ArgumentParser(description="CLI To-Do List")
     group = parser.add_mutually_exclusive_group()
