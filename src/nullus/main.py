@@ -303,14 +303,13 @@ def load_view(conn):
         tasks.drop("tag_desc")
         .unique(subset=["id"])
         .join(concat_task_tag, on="id", how="inner", validate="1:1")
-        .sort("id", descending=False)
     )
 
     return tasks
 
 
 def dump_tasks(conn, regex=None):
-    task_to_print = load_view(conn)
+    task_to_print = load_view(conn).sort("id", descending=False)
 
     if regex:
         regex = regex.lower()
@@ -332,8 +331,7 @@ def dump_tasks(conn, regex=None):
 
 
 def list_tasks(conn, regex=None):
-    """List all tasks or filter by regex."""
-    tasks = load_view(conn)
+    tasks = load_view(conn).sort(["is_pin", "id"], descending=[True, False])
 
     task_to_print = tasks.filter(pl.col("is_visible"))
 
@@ -362,13 +360,9 @@ def list_tasks(conn, regex=None):
                     .alias("pin"),
                 )
 
-                sort_cols = ["is_pin", "status", "scheduled", "deadline"]
-                sort_order = [True, True, True, True]
                 show_cols = ["pin", "id", "status", "desc", "tags"]
 
             else:
-                sort_cols = ["status", "scheduled", "deadline"]
-                sort_order = [True, True, True]
                 show_cols = ["id", "status", "desc", "tags"]
 
             task_to_print = task_to_print.with_columns(
@@ -381,13 +375,8 @@ def list_tasks(conn, regex=None):
             if any(task_to_print["deadline"]):
                 show_cols.append("deadline")
 
-            task_to_print = (
-                task_to_print.sort(
-                    sort_cols,
-                    descending=sort_order,
-                )
-                .select(show_cols)
-                .with_columns(pl.all().fill_null(""))
+            task_to_print = task_to_print.select(show_cols).with_columns(
+                pl.all().fill_null("")
             )
 
             print(task_to_print)
@@ -483,7 +472,7 @@ def main():
         "--tag",
         nargs="+",
         metavar=("TASK_IDS", "TAGS"),
-        help="add/remove tag(s) to tasks(s)",
+        help="add/remove comma-seperated tag(s) to tasks(s)",
     )
 
     group.add_argument(
