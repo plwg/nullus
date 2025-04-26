@@ -2,7 +2,7 @@
 
 ## Usage
 
-`uv` is required:
+`uv` is recommended:
 
 ```bash
 pip install uv
