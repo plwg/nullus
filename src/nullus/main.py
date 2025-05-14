@@ -7,7 +7,6 @@ from pathlib import Path
 
 import polars as pl
 
-
 SCHEMA = {
     "id": pl.Int64,
     "perma_id": pl.String,
@@ -184,7 +183,7 @@ def toggle_done(task_ids, conn):
     )
 
     tasks = tasks.with_columns(
-        pl.when(~(pl.col("status") == "DONE"))
+        pl.when(pl.col("status") != "DONE", pl.col("id").is_in(task_ids))
         .then(pl.lit(True))
         .otherwise(pl.col("is_visible"))
         .alias("is_visible"),
