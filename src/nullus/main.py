@@ -99,7 +99,7 @@ def tag_tasks(task_ids, tags, conn):
     tags_with_ids = [t[0] for t in tags_with_ids]
 
     tasks_perma_id_to_tag = cursor.execute(
-        "SELECT perma_id from tasks WHERE id IN (%s)" % ",".join("?" for i in task_ids),
+        "SELECT perma_id from tasks WHERE id IN (%s)" % ",".join("?" for _ in task_ids),
         task_ids,
     ).fetchall()
 
@@ -268,7 +268,7 @@ def purge(task_ids, conn):
     cursor = conn.cursor()
 
     tasks_perma_id_to_delete = cursor.execute(
-        f"SELECT perma_id from tasks WHERE id IN ({','.join('?' for i in task_ids)})",
+        f"SELECT perma_id from tasks WHERE id IN ({','.join('?' for _ in task_ids)})",
         task_ids,
     ).fetchall()
 
