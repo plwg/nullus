@@ -52,7 +52,7 @@ def add_task(new_tasks, conn):
 
     new_tasks = pl.DataFrame(
         {
-            "perma_id": [str(uuid.uuid4()) for i in range(num_new_tasks)],
+            "perma_id": [str(uuid.uuid4()) for _ in range(num_new_tasks)],
             "status": ["TODO"] * num_new_tasks,
             "desc": [t.capitalize() for t in new_tasks],
             "scheduled": [None] * num_new_tasks,
