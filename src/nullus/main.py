@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import argparse
 import sqlite3
 import uuid
 from datetime import datetime
 from itertools import product
 from pathlib import Path
+from typing import cast
 
 import polars as pl
 
@@ -21,19 +24,17 @@ SCHEMA = {
 }
 
 
-def load_tasks(conn):
+def load_tasks(conn: sqlite3.Connection) -> pl.LazyFrame:
     query = "SELECT * FROM tasks"
 
-    tasks = pl.read_database(
+    return pl.read_database(
         query=query,
         connection=conn,
         schema_overrides=SCHEMA,
     ).lazy()
 
-    return tasks
 
-
-def save_tasks(tasks, conn):
+def save_tasks(tasks: pl.LazyFrame, conn: sqlite3.Connection) -> None:
     cursor = conn.cursor()
 
     cursor.execute("DELETE FROM tasks")
@@ -45,12 +46,12 @@ def save_tasks(tasks, conn):
         )
 
 
-def add_task(new_tasks, conn):
+def add_task(new_tasks: list[str], conn: sqlite3.Connection) -> None:
     tasks = load_tasks(conn)
 
     num_new_tasks = len(new_tasks)
 
-    new_tasks = pl.DataFrame(
+    new_tasks_frame = pl.DataFrame(
         {
             "perma_id": [str(uuid.uuid4()) for _ in range(num_new_tasks)],
             "status": ["TODO"] * num_new_tasks,
@@ -65,7 +66,7 @@ def add_task(new_tasks, conn):
         schema_overrides=SCHEMA,
     ).lazy()
 
-    tasks = pl.concat([tasks.drop("id"), new_tasks])
+    tasks = cast("pl.LazyFrame", pl.concat([tasks.drop("id"), new_tasks_frame]))
 
     tasks = reindex(tasks)
 
@@ -74,8 +75,8 @@ def add_task(new_tasks, conn):
     list_tasks(conn)
 
 
-def tag_tasks(task_ids, tags, conn):
-    tags = tags.split(",")
+def tag_tasks(task_ids: list[int], str_tags: str, conn: sqlite3.Connection) -> None:
+    tags = str_tags.split(",")
 
     cursor = conn.cursor()
 
@@ -125,7 +126,7 @@ def tag_tasks(task_ids, tags, conn):
     list_tasks(conn)
 
 
-def pin_task(task_ids, conn):
+def pin_task(task_ids: list[int], conn: sqlite3.Connection) -> None:
     tasks = load_tasks(conn)
 
     tasks = tasks.with_columns(
@@ -142,7 +143,7 @@ def pin_task(task_ids, conn):
     list_tasks(conn)
 
 
-def toggle_delete(task_ids, conn):
+def toggle_delete(task_ids: list[int], conn: sqlite3.Connection) -> None:
     tasks = load_tasks(conn)
 
     tasks = tasks.with_columns(
@@ -161,7 +162,7 @@ def toggle_delete(task_ids, conn):
     list_tasks(conn)
 
 
-def toggle_done(task_ids, conn):
+def toggle_done(task_ids: list[int], conn: sqlite3.Connection) -> None:
     tasks = load_tasks(conn)
 
     tasks = tasks.with_columns(
@@ -194,7 +195,7 @@ def toggle_done(task_ids, conn):
     list_tasks(conn)
 
 
-def schedule_task(date, task_ids, conn):
+def schedule_task(date: str, task_ids: list[int], conn: sqlite3.Connection) -> None:
     tasks = load_tasks(conn)
     tasks = tasks.with_columns(
         pl.when(pl.col("id").is_in(task_ids))
@@ -208,7 +209,7 @@ def schedule_task(date, task_ids, conn):
     list_tasks(conn)
 
 
-def update_task(task_id, new_desc, conn):
+def update_task(task_id: int, new_desc: str, conn: sqlite3.Connection) -> None:
     tasks = load_tasks(conn)
     tasks = tasks.with_columns(
         pl.when(pl.col("id") == task_id)
@@ -222,7 +223,7 @@ def update_task(task_id, new_desc, conn):
     list_tasks(conn)
 
 
-def set_deadline(date, task_ids, conn):
+def set_deadline(date: str, task_ids: list[int], conn: sqlite3.Connection) -> None:
     tasks = load_tasks(conn)
     tasks = tasks.with_columns(
         pl.when(pl.col("id").is_in(task_ids))
@@ -236,8 +237,8 @@ def set_deadline(date, task_ids, conn):
     list_tasks(conn)
 
 
-def reindex(tasks):
-    tasks = (
+def reindex(tasks: pl.LazyFrame) -> pl.LazyFrame:
+    return (
         tasks.sort(
             ["is_visible", "is_pin", "status", "scheduled", "deadline"],
             descending=[True, True, True, False, False],
@@ -246,10 +247,8 @@ def reindex(tasks):
         .with_row_index("id", offset=1)
     )
 
-    return tasks
 
-
-def prune_done(conn):
+def prune_done(conn: sqlite3.Connection) -> None:
     tasks = load_tasks(conn)
     tasks = tasks.with_columns(
         pl.when(pl.col("status") == "DONE")
@@ -264,7 +263,7 @@ def prune_done(conn):
     list_tasks(conn)
 
 
-def purge(task_ids, conn):
+def purge(task_ids: list[int], conn: sqlite3.Connection) -> None:
     cursor = conn.cursor()
 
     tasks_perma_id_to_delete = cursor.execute(
@@ -284,7 +283,7 @@ def purge(task_ids, conn):
     list_tasks(conn)
 
 
-def load_view(conn):
+def load_view(conn: sqlite3.Connection) -> pl.DataFrame:
     query = "SELECT * FROM tasks_with_tag"
 
     tasks = pl.read_database(
@@ -298,16 +297,14 @@ def load_view(conn):
         .drop("tag_desc")
     )
 
-    tasks = (
+    return (
         tasks.drop("tag_desc")
         .unique(subset=["id"])
         .join(concat_task_tag, on="id", how="inner", validate="1:1")
     )
 
-    return tasks
 
-
-def dump_tasks(conn, regex=None):
+def dump_tasks(conn: sqlite3.Connection, regex: str | None = None) -> None:
     task_to_print = load_view(conn).sort("id", descending=False)
 
     if regex:
@@ -329,7 +326,7 @@ def dump_tasks(conn, regex=None):
         print(task_to_print)
 
 
-def list_tasks(conn, regex=None):
+def list_tasks(conn: sqlite3.Connection, regex: str | None = None) -> None:
     tasks = load_view(conn).sort(["is_pin", "id"], descending=[True, False])
 
     task_to_print = tasks.filter(pl.col("is_visible"))
@@ -384,11 +381,11 @@ def list_tasks(conn, regex=None):
         print("No active tasks found.")
 
 
-def parse_list_of_int(list_of_int):
+def parse_list_of_int(list_of_int: list[str]) -> list[int]:
     return [int(s) for s in list_of_int]
 
 
-def init_db(conn):
+def init_db(conn: sqlite3.Connection) -> None:
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -434,7 +431,7 @@ def init_db(conn):
     """)
 
 
-def main():
+def main() -> None:
     DATA_PATH = Path("~/.config/nullus/").expanduser()
     TASKS_FILE = "task.db"
 
